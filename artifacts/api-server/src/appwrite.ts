@@ -27,47 +27,53 @@ type AppwriteContext = {
 };
 
 export default async function handler({ req, res, log, error }: AppwriteContext) {
-  const url = req.queryString ? `${req.path}?${req.queryString}` : req.path;
+  try {
+    const url = req.queryString ? `${req.path}?${req.queryString}` : req.path;
 
-  const nodeReq = Object.assign(new IncomingMessage(new Socket()), {
-    method: req.method,
-    url,
-    headers: req.headers,
-  });
+    const nodeReq = Object.assign(new IncomingMessage(new Socket()), {
+      method: req.method,
+      url,
+      headers: req.headers,
+    });
 
-  if (req.bodyRaw) {
-    nodeReq.push(req.bodyRaw);
-  }
-  nodeReq.push(null);
+    if (req.bodyRaw) nodeReq.push(req.bodyRaw);
+    nodeReq.push(null);
 
-  const chunks: Buffer[] = [];
+    const chunks: Buffer[] = [];
 
-  const nodeRes = new ServerResponse(nodeReq);
+    const nodeRes = new ServerResponse(nodeReq);
 
-  (nodeRes as any).write = (chunk: any) => {
-    if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    return true;
-  };
+    (nodeRes as any).write = (chunk: any) => {
+      if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      return true;
+    };
 
-  (nodeRes as any).end = (chunk?: any) => {
-    if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    nodeRes.emit("finish");
-    return nodeRes;
-  };
+    (nodeRes as any).end = (chunk?: any) => {
+      if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      nodeRes.emit("finish");
+      return nodeRes;
+    };
 
-  await new Promise<void>((resolve) => {
-    (app as any).handle(nodeReq, nodeRes, resolve);
-    nodeRes.once("finish", resolve);
-  });
+    await new Promise<void>((resolve) => {
+      (app as any).handle(nodeReq, nodeRes, resolve);
+      nodeRes.once("finish", resolve);
+    });
 
-  const body = Buffer.concat(chunks).toString("utf-8");
+    const body = Buffer.concat(chunks).toString("utf-8");
 
-  const headers: Record<string, string> = {};
-  for (const [key, value] of Object.entries(nodeRes.getHeaders())) {
-    if (value !== undefined) {
-      headers[key] = Array.isArray(value) ? value.join(", ") : String(value);
+    const headers: Record<string, string> = {};
+    for (const [key, value] of Object.entries(nodeRes.getHeaders())) {
+      if (value !== undefined) headers[key] = Array.isArray(value) ? value.join(", ") : String(value);
     }
-  }
 
-  res.send(body, nodeRes.statusCode ?? 200, headers);
+    // Always return a response
+    if (!body) {
+      return res.empty();
+    } else {
+      return res.send(body, nodeRes.statusCode ?? 200, headers);
+    }
+  } catch (err: any) {
+    error?.(err.message || String(err));
+    return res.empty();
+  }
 }
